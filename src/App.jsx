@@ -326,20 +326,6 @@ function App() {
                 </div>
               </div>
 
-              {/* 数据采集说明 */}
-              {filteredContent.采集说明 && filteredContent.采集说明.length > 0 && (
-                <div className="collection-section">
-                  <h2 className="section-header">⚠️ 数据采集说明</h2>
-                  <div className="collection-list">
-                    {filteredContent.采集说明.map((item, index) => (
-                      <div key={index} className="collection-item" 
-                        dangerouslySetInnerHTML={{ __html: formatCollectionItem(item) }} 
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* 内容标题 */}
               <div className="content-header">
                 <h2 className="content-title">
@@ -509,23 +495,6 @@ function App() {
                 </div>
               )}
 
-              {/* 其他动态区域 */}
-              {filteredContent.其他动态 && filteredContent.其他动态.length > 0 && (
-                <div className="other-section">
-                  <h2 className="section-header">📝 其他动态</h2>
-                  <div className="other-list">
-                    {filteredContent.其他动态.map((item, index) => (
-                      <div key={index} className="other-item">
-                        {item.vendor && item.vendor !== '其他' && (
-                          <span className="other-vendor">【{item.vendor}】</span>
-                        )}
-                        <span className="other-text">{item.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* 最近7日动态回顾 */}
               {filteredContent.recent7Days && filteredContent.recent7Days.length > 0 && (
                 <div className="recent7days-section">
@@ -582,14 +551,6 @@ function App() {
         </p>
       </footer>
     </div>
-  );
-}
-
-// 格式化采集说明项
-function formatCollectionItem(text) {
-  // 将 **xxx**: yyy 格式转换为HTML
-  return text.replace(/\*\*([^*]+)\*\*[：:]\s*([^*\n]+)/g, 
-    '<strong>$1</strong>: <span>$2</span>'
   );
 }
 

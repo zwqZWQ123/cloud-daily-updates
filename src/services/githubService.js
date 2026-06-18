@@ -48,13 +48,6 @@ export async function fetchDailyContent(date) {
   }
 }
 
-/**
- * 解析 Markdown 内容
- * 支持以下格式：
- * 1. 6月4日-6月8日：## 📌 详细条目 + ### 厂商 🟢/🟡/🔴 + 数字列表
- * 2. 6月9日-6月13日：## 🟡 中优先级 + ### 1. 【厂商】标题
- * 3. 6月14日及之后：## 📝 延续昨日动态 + ### 🟡 中优先级 (延续)
- */
 function parseMarkdownContent(content, date) {
   const lines = content.split('\n');
   const result = {
@@ -68,15 +61,12 @@ function parseMarkdownContent(content, date) {
       medium: 0,
       low: 0
     },
-    采集说明: [],
     vendors: [],
     alerts: [],
     recent7Days: [],
-    其他动态: [],
     rawContent: content
   };
 
-  // 存储所有动态（按厂商分组）
   const vendorMap = new Map();
   const getOrCreateVendor = (name) => {
     if (!vendorMap.has(name)) {
@@ -96,8 +86,6 @@ function parseMarkdownContent(content, date) {
   let currentItem = null;
   let inAlertSection = false;
   let inRecent7DaysSection = false;
-  let inCollectionSection = false;
-  let inOtherSection = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -111,27 +99,19 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 一级标题
     if (trimmedLine.startsWith('# ')) {
       result.title = trimmedLine.substring(2).trim();
       continue;
     }
 
-    // 提取元信息
     if (trimmedLine.startsWith('>')) {
       const metaMatch = trimmedLine.match(/采集时间[：:]\s*([^|]+)/);
       if (metaMatch) result.采集时间 = metaMatch[1].trim();
       const sourceMatch = trimmedLine.match(/来源[：:]\s*(.+)/);
       if (sourceMatch) result.来源 = sourceMatch[1].trim();
-      
-      // 采集说明中的引用块
-      if (inCollectionSection) {
-        result.采集说明.push(trimmedLine.replace(/^>\s*/, ''));
-      }
       continue;
     }
 
-    // 二级标题 - 大章节
     if (trimmedLine.startsWith('## ')) {
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
@@ -140,21 +120,13 @@ function parseMarkdownContent(content, date) {
 
       const sectionName = trimmedLine.substring(3).trim();
       
-      // 重置状态
       inAlertSection = false;
       inRecent7DaysSection = false;
-      inCollectionSection = false;
-      inOtherSection = false;
       currentVendor = null;
 
       if (sectionName.includes('📊') || sectionName.includes('今日概览')) {
         currentSection = 'overview';
-      } else if (sectionName.includes('数据采集说明') || sectionName.includes('⚠️ 数据采集')) {
-        currentSection = '采集说明';
-        inCollectionSection = true;
-        result.采集说明 = [];
       } else if (sectionName.includes('📌 详细条目') || sectionName.includes('详细条目')) {
-        // 6月4日-6月8日格式
         currentSection = 'detail';
       } else if (sectionName.includes('今日动态汇总') || sectionName.includes('📋 今日')) {
         currentSection = 'summary';
@@ -164,12 +136,9 @@ function parseMarkdownContent(content, date) {
       } else if (sectionName.includes('中优先级') || sectionName.includes('🟡 中')) {
         currentSection = 'medium';
         currentPriority = { level: 'medium', name: '中优先级', color: '#FAAD14', icon: '🟡' };
-      } else if (sectionName.includes('低优先级') || sectionName.includes('� 低')) {
+      } else if (sectionName.includes('低优先级') || sectionName.includes('🟢 低')) {
         currentSection = 'low';
         currentPriority = { level: 'low', name: '低优先级', color: '#52C41A', icon: '🟢' };
-      } else if (sectionName.includes('其他动态') || sectionName.includes('📝 其他')) {
-        currentSection = 'other';
-        inOtherSection = true;
       } else if (sectionName.includes('延续') || sectionName.includes('📝 延续')) {
         currentSection = 'extended';
       } else if (sectionName.includes('活跃告警') || sectionName.includes('⚠️ 活跃') || sectionName.includes('🚨')) {
@@ -182,13 +151,14 @@ function parseMarkdownContent(content, date) {
         currentSection = 'notes';
       } else if (sectionName.includes('统计') || sectionName.includes('📊 统计')) {
         currentSection = 'stats';
+      } else if (sectionName.includes('其他动态') || sectionName.includes('📝 其他')) {
+        currentSection = 'other';
       } else {
         currentSection = 'other';
       }
       continue;
     }
 
-    // 三级标题 - 优先级或厂商
     if (trimmedLine.startsWith('### ')) {
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
@@ -197,22 +167,21 @@ function parseMarkdownContent(content, date) {
 
       const sectionName = trimmedLine.substring(4).trim();
       
-      // 判断是优先级标题还是厂商标题
-      if (isPrioritySection(sectionName)) {
-        // 优先级标题 (如：### 🟡 中优先级 (延续))
+      if (sectionName.match(/^[🔴🟡🟢]\s*(高优先级|中优先级|低优先级)/)) {
         const priority = parsePriority(sectionName);
         if (sectionName.includes('延续')) {
           priority.isExtended = true;
         }
         currentPriority = priority;
         currentVendor = null;
+      } else if (sectionName.match(/^高优先级|^中优先级|^低优先级/)) {
+        const priority = parsePriority(sectionName);
+        currentPriority = priority;
+        currentVendor = null;
       } else {
-        // 厂商标题 (如：### AWS 🟢、### Azure 🟢、### 阿里云 🟡 中)
-        // 提取厂商名
         const vendorName = extractVendorNameFromHeader(sectionName);
         currentVendor = getOrCreateVendor(vendorName);
         
-        // 提取标题中的优先级图标
         if (sectionName.includes('🔴')) {
           currentPriority = { level: 'high', name: '高优先级', color: '#FF4D4F', icon: '🔴' };
         } else if (sectionName.includes('🟡')) {
@@ -222,37 +191,24 @@ function parseMarkdownContent(content, date) {
         } else if (sectionName.includes('⚪') || sectionName.includes('待确认')) {
           currentPriority = { level: 'other', name: '待确认', color: '#8C8C8C', icon: '⚪' };
         } else {
-          // 标题中包含【类型】标记
-          const typeMatch = sectionName.match(/【(.+?)】/);
-          if (typeMatch) {
-            currentPriority = { level: 'medium', name: typeMatch[1], color: '#FAAD14', icon: '🟡' };
-          } else {
-            currentPriority = { level: 'other', name: '其他', color: '#8C8C8C', icon: '⚪' };
-          }
+          currentPriority = { level: 'other', name: '其他', color: '#8C8C8C', icon: '⚪' };
         }
       }
       continue;
     }
 
-    // 项目标题
     const itemTitleResult = parseItemTitle(trimmedLine);
     if (itemTitleResult) {
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
       }
 
-      // 确定厂商
       let vendor = currentVendor;
       if (itemTitleResult.vendorName) {
-        // 标题中包含【厂商】标记
         vendor = getOrCreateVendor(itemTitleResult.vendorName);
       }
       
-      // 确定优先级
       let priority = currentPriority;
-      if (itemTitleResult.priorityHint) {
-        priority = itemTitleResult.priorityHint;
-      }
 
       currentItem = {
         title: itemTitleResult.title,
@@ -274,15 +230,9 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 列表项 - 项目属性
     if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('  - ')) {
-      // 处理两种格式：
-      // 1. - **字段名**：值
-      // 2. - 字段名：值
-      
       let fieldMatch = trimmedLine.match(/^\s*-\s*\*\*(.+?)\*\*[：:]\s*(.+)/);
       if (!fieldMatch) {
-        // 尝试匹配普通格式
         fieldMatch = trimmedLine.match(/^\s*-\s*([^：:]+)[：:]\s*(.+)/);
       }
       
@@ -303,7 +253,6 @@ function parseMarkdownContent(content, date) {
         } else if (fieldName === '紧急程度' || fieldName === '紧急度') {
           currentItem.紧急程度 = fieldValue;
         } else if (fieldName === '来源' || fieldName === '区域' || fieldName === '服务') {
-          // 尝试提取URL
           const urlMatch = fieldValue.match(/https?:\/\/[^\s\)]+/);
           if (urlMatch) {
             currentItem.来源 = urlMatch[0];
@@ -317,7 +266,6 @@ function parseMarkdownContent(content, date) {
         }
       }
       
-      // 处理"来源：[标题](URL)"格式
       if (currentItem && trimmedLine.match(/^\s*-\s*来源/)) {
         const linkMatch = trimmedLine.match(/\[([^\]]+)\]\(([^)]+)\)/);
         if (linkMatch) {
@@ -328,7 +276,6 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 厂商段落注释（如"暂无最新抓取数据"）
     if (currentVendor && currentVendor.items.length === 0 && currentItem === null) {
       if (trimmedLine.startsWith('-') || trimmedLine.startsWith('*')) {
         const note = trimmedLine.replace(/^[-*]\s*/, '').trim();
@@ -342,7 +289,6 @@ function parseMarkdownContent(content, date) {
       }
     }
 
-    // 概览统计
     if (currentSection === 'overview' && trimmedLine.includes('**')) {
       const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+|待[更统][新计]|约?\s*\d+)/);
       if (statMatch) {
@@ -366,7 +312,6 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 统计区域（老格式）
     if (currentSection === 'stats' && trimmedLine.includes('**')) {
       const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+|待[更统][新计])/);
       if (statMatch) {
@@ -386,18 +331,9 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 采集说明（普通格式）
-    if (inCollectionSection && !trimmedLine.startsWith('>') && trimmedLine.includes('**')) {
-      result.采集说明.push(trimmedLine);
-      continue;
-    }
-
-    // 告警解析
     if (inAlertSection) {
       if (trimmedLine.includes('-') && !trimmedLine.startsWith('##')) {
-        // 处理表格行或列表
         if (trimmedLine.startsWith('|')) {
-          // 表格行
           const cells = trimmedLine.split('|').filter(cell => cell.trim());
           if (cells.length >= 3 && !cells[0].includes('---')) {
             result.alerts.push({
@@ -423,7 +359,6 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 7日回顾表格解析
     if (inRecent7DaysSection && trimmedLine.includes('|')) {
       if (!trimmedLine.includes('---') && !trimmedLine.includes('日期') && !trimmedLine.includes('厂商')) {
         const cells = trimmedLine.split('|').filter(cell => cell.trim());
@@ -440,37 +375,15 @@ function parseMarkdownContent(content, date) {
       }
       continue;
     }
-
-    // 其他动态区域
-    if (inOtherSection) {
-      if (trimmedLine.startsWith('### ')) {
-        // 已经在前面处理
-        continue;
-      }
-      if (trimmedLine.startsWith('- ')) {
-        const text = trimmedLine.replace(/^-\s*/, '').trim();
-        if (text && !text.match(/^\*\*[^*]+\*\*/)) {
-          if (result.其他动态.length < 50) { // 防止过多
-            result.其他动态.push({
-              vendor: currentVendor ? currentVendor.name : '其他',
-              text: text
-            });
-          }
-        }
-      }
-    }
   }
 
-  // 保存最后一个项目
   if (currentItem && currentVendor) {
     currentVendor.items.push(currentItem);
   }
 
-  // 转换为数组并按厂商排序
   result.vendors = Array.from(vendorMap.values())
     .filter(v => v.items.length > 0 || v.note)
     .sort((a, b) => {
-      // 优先排序有动态的厂商
       if (a.items.length > 0 && b.items.length === 0) return -1;
       if (a.items.length === 0 && b.items.length > 0) return 1;
       return 0;
@@ -479,55 +392,31 @@ function parseMarkdownContent(content, date) {
   return result;
 }
 
-/**
- * 判断是否是优先级章节标题
- */
-function isPrioritySection(text) {
-  return /[🔴🟡🟢].*(高优先|中优先|低优先)/.test(text) ||
-         /^高优先级/.test(text) ||
-         /^中优先级/.test(text) ||
-         /^低优先级/.test(text) ||
-         /^\d+\./.test(text) || // 数字开头的（如：### 1. 【腾讯云】...）
-         /【.+?】/.test(text); // 【】标记开头的
-}
-
-/**
- * 从标题中提取厂商名
- */
 function extractVendorNameFromHeader(text) {
-  // 移除优先级图标
   let name = text
     .replace(/^[🔴🟠🟡🟢⚪]\s*/, '')
     .replace(/\s*[🔴🟠🟡🟢⚪]\s*$/, '')
     .replace(/^\d+\.\s*/, '')
     .trim();
   
-  // 提取【】中的内容作为类型提示
   const typeMatch = name.match(/【(.+?)】/);
   if (typeMatch) {
-    // 检查【】中是否包含厂商关键词
     const inner = typeMatch[1];
     if (inner.includes('AWS') || inner.includes('Azure') || 
         inner.includes('阿里') || inner.includes('腾讯') || inner.includes('华为')) {
       return inner;
     }
-    // 如果不是厂商，保留整个标题作为名称
     return name;
   }
   
   return name;
 }
 
-/**
- * 解析项目标题
- * 返回 { title, cleanTitle, vendorName, priorityHint }
- */
 function parseItemTitle(text) {
   // 格式1：1. **【腾讯云】标题** (2026-06-03)
   let match = text.match(/^(\d+)\.\s*\*\*(.+?)\*\*(?:\s*\((\d{4}-\d{2}-\d{2})\))?$/);
   if (match) {
     const fullTitle = match[2].trim();
-    const date = match[3] || '';
     const { vendorName, cleanTitle } = extractVendorFromTitle(fullTitle);
     return {
       title: fullTitle,
@@ -538,17 +427,6 @@ function parseItemTitle(text) {
   }
 
   // 格式2：1. **标题** (不带【】)
-  match = text.match(/^(\d+)\.\s*\*\*(.+?)\*\*(?:\s*\((\d{4}-\d{2}-\d{2})\))?$/);
-  if (match) {
-    return {
-      title: match[2].trim(),
-      cleanTitle: match[2].trim(),
-      vendorName: null,
-      priorityHint: null
-    };
-  }
-
-  // 格式3：1. **标题** - 无日期
   match = text.match(/^(\d+)\.\s*\*\*(.+?)\*\*$/);
   if (match) {
     const fullTitle = match[2].trim();
@@ -561,7 +439,33 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式4：- **标题** （列表项）
+  // 格式3：1. 【腾讯云】标题 (无**包裹，格式3)
+  match = text.match(/^(\d+)\.\s*【(.+?)】(.+)/);
+  if (match) {
+    const vendorName = match[2].trim();
+    const cleanTitle = match[3].trim();
+    return {
+      title: `【${vendorName}】${cleanTitle}`,
+      cleanTitle: cleanTitle,
+      vendorName: vendorName,
+      priorityHint: null
+    };
+  }
+
+  // 格式4：1. 标题 (无**包裹，格式3)
+  match = text.match(/^(\d+)\.\s*(.+)/);
+  if (match) {
+    const fullTitle = match[2].trim();
+    const { vendorName, cleanTitle } = extractVendorFromTitle(fullTitle);
+    return {
+      title: fullTitle,
+      cleanTitle: cleanTitle,
+      vendorName: vendorName,
+      priorityHint: null
+    };
+  }
+
+  // 格式5：- **标题** （列表项）
   match = text.match(/^-\s*\*\*(.+?)\*\*$/);
   if (match) {
     const fullTitle = match[1].trim();
@@ -574,12 +478,22 @@ function parseItemTitle(text) {
     };
   }
 
+  // 格式6：- 【腾讯云】标题（列表项，格式3）
+  match = text.match(/^-\s*【(.+?)】(.+)/);
+  if (match) {
+    const vendorName = match[1].trim();
+    const cleanTitle = match[2].trim();
+    return {
+      title: `【${vendorName}】${cleanTitle}`,
+      cleanTitle: cleanTitle,
+      vendorName: vendorName,
+      priorityHint: null
+    };
+  }
+
   return null;
 }
 
-/**
- * 从标题中提取厂商
- */
 function extractVendorFromTitle(title) {
   const match = title.match(/【(.+?)】/);
   if (match) {
@@ -590,9 +504,6 @@ function extractVendorFromTitle(title) {
   return { vendorName: null, cleanTitle: title };
 }
 
-/**
- * 清理厂商名称
- */
 function cleanVendorName(name) {
   if (!name) return '其他';
   return name
