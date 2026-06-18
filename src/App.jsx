@@ -448,6 +448,13 @@ function App() {
                                 </div>
                               )}
 
+                              {item.详情 && (
+                                <div className="item-field summary-field">
+                                  <span className="field-label">📝 详情</span>
+                                  <span className="field-value">{item.详情}</span>
+                                </div>
+                              )}
+
                               {item.影响范围 && (
                                 <div className="item-field">
                                   <span className="field-label">🎯 影响范围</span>
@@ -478,8 +485,19 @@ function App() {
                                 className="source-link"
                               >
                                 <span className="source-icon">🔗</span>
-                                <span className="source-text">查看来源</span>
-                                <span className="source-domain">{getDomainFromUrl(item.来源)}</span>
+                                <span className="source-text">
+                                  {item.来源标题 ? '查看详情' : '查看来源'}
+                                </span>
+                                {item.来源标题 && (
+                                  <span className="source-title" title={item.来源标题}>
+                                    {item.来源标题.length > 30 
+                                      ? item.来源标题.substring(0, 30) + '...' 
+                                      : item.来源标题}
+                                  </span>
+                                )}
+                                {!item.来源标题 && (
+                                  <span className="source-domain">{getDomainFromUrl(item.来源)}</span>
+                                )}
                                 <span className="source-arrow">→</span>
                               </a>
                             )}
@@ -488,6 +506,23 @@ function App() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* 其他动态区域 */}
+              {filteredContent.其他动态 && filteredContent.其他动态.length > 0 && (
+                <div className="other-section">
+                  <h2 className="section-header">📝 其他动态</h2>
+                  <div className="other-list">
+                    {filteredContent.其他动态.map((item, index) => (
+                      <div key={index} className="other-item">
+                        {item.vendor && item.vendor !== '其他' && (
+                          <span className="other-vendor">【{item.vendor}】</span>
+                        )}
+                        <span className="other-text">{item.text}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

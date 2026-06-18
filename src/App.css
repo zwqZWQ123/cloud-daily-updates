@@ -391,6 +391,40 @@ body {
   color: var(--text-color);
 }
 
+/* 其他动态区域 */
+.other-section {
+  background: linear-gradient(135deg, #f0f5ff 0%, #e6f7ff 100%);
+  border: 1px solid #91d5ff;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.other-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.other-item {
+  background: white;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border-left: 3px solid #1890ff;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.other-vendor {
+  color: #1890ff;
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.other-text {
+  color: var(--text-color);
+}
+
 /* 元信息 */
 .meta-info {
   margin-top: 0.5rem;
