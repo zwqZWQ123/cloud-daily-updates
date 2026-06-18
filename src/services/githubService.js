@@ -69,15 +69,28 @@ function parseMarkdownContent(content, date) {
 
   const vendorMap = new Map();
   const getOrCreateVendor = (name) => {
-    if (!vendorMap.has(name)) {
-      vendorMap.set(name, {
-        name: cleanVendorName(name),
-        id: extractVendorId(name),
-        items: [],
-        note: ''
-      });
+    if (!name) return null;
+    const cleanName = cleanVendorName(name);
+    if (!cleanName || cleanName === '其他') return null;
+    
+    const existingEntry = Array.from(vendorMap.values()).find(v => 
+      v.name === cleanName || 
+      cleanName.includes(v.name) || 
+      v.name.includes(cleanName)
+    );
+    
+    if (existingEntry) {
+      return existingEntry;
     }
-    return vendorMap.get(name);
+    
+    const vendor = {
+      name: cleanName,
+      id: extractVendorId(cleanName),
+      items: [],
+      note: ''
+    };
+    vendorMap.set(cleanName, vendor);
+    return vendor;
   };
 
   let currentSection = null;
@@ -147,25 +160,62 @@ function parseMarkdownContent(content, date) {
       } else if (sectionName.includes('最近7日') || sectionName.includes('📅')) {
         currentSection = 'recent7Days';
         inRecent7DaysSection = true;
-      } else if (sectionName.includes('备注') || sectionName.includes('📝 备注')) {
-        currentSection = 'notes';
       } else if (sectionName.includes('统计') || sectionName.includes('📊 统计')) {
         currentSection = 'stats';
-      } else if (sectionName.includes('其他动态') || sectionName.includes('📝 其他')) {
-        currentSection = 'other';
       } else {
-        currentSection = 'other';
+        const vendorName = extractVendorNameFromSection(sectionName);
+        if (vendorName) {
+          currentVendor = getOrCreateVendor(vendorName);
+          currentSection = 'vendor';
+        } else {
+          currentSection = 'other';
+        }
       }
       continue;
     }
 
     if (trimmedLine.startsWith('### ')) {
+      const sectionName = trimmedLine.substring(4).trim();
+      
+      if (sectionName.match(/^\d+\./)) {
+        const itemTitleResult = parseItemTitle(sectionName);
+        if (itemTitleResult) {
+          if (currentItem && currentVendor) {
+            currentVendor.items.push({...currentItem});
+          }
+
+          let vendor = currentVendor;
+          if (itemTitleResult.vendorName) {
+            vendor = getOrCreateVendor(itemTitleResult.vendorName);
+          }
+          
+          let priority = currentPriority;
+
+          currentItem = {
+            title: itemTitleResult.title,
+            cleanTitle: itemTitleResult.cleanTitle,
+            priority: priority,
+            type: '',
+            摘要: '',
+            详情: '',
+            影响范围: '',
+            日期: '',
+            紧急程度: '',
+            来源: '',
+            isExtended: priority?.isExtended || (itemTitleResult.cleanTitle && itemTitleResult.cleanTitle.includes('延续'))
+          };
+
+          if (vendor) {
+            currentVendor = vendor;
+          }
+        }
+        continue;
+      }
+
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
         currentItem = null;
       }
-
-      const sectionName = trimmedLine.substring(4).trim();
       
       if (sectionName.match(/^[🔴🟡🟢]\s*(高优先级|中优先级|低优先级)/)) {
         const priority = parsePriority(sectionName);
@@ -173,11 +223,9 @@ function parseMarkdownContent(content, date) {
           priority.isExtended = true;
         }
         currentPriority = priority;
-        currentVendor = null;
       } else if (sectionName.match(/^高优先级|^中优先级|^低优先级/)) {
         const priority = parsePriority(sectionName);
         currentPriority = priority;
-        currentVendor = null;
       } else {
         const vendorName = extractVendorNameFromHeader(sectionName);
         currentVendor = getOrCreateVendor(vendorName);
@@ -226,6 +274,29 @@ function parseMarkdownContent(content, date) {
 
       if (vendor) {
         currentVendor = vendor;
+      }
+      continue;
+    }
+
+    if ((currentSection === 'overview' || currentSection === 'stats') && trimmedLine.startsWith('- ')) {
+      const overviewMatch = trimmedLine.match(/^\s*-\s*\*\*(.+?)\*\*[：:]\s*(\d+|待[更统][新计]|约?\s*\d+)/);
+      if (overviewMatch) {
+        const label = overviewMatch[1].trim();
+        let value = overviewMatch[2].trim();
+        if (value.includes('约')) {
+          value = value.replace(/约\s*/, '');
+        }
+        const count = parseInt(value) || 0;
+        
+        if (label.includes('总采集') || label.includes('总') || label.includes('今日采集')) {
+          result.overview.total = count;
+        } else if (label.includes('高优先') || label.includes('🔴')) {
+          result.overview.high = count;
+        } else if (label.includes('中优先') || label.includes('🟡')) {
+          result.overview.medium = count;
+        } else if (label.includes('低优先') || label.includes('🟢')) {
+          result.overview.low = count;
+        }
       }
       continue;
     }
@@ -289,7 +360,7 @@ function parseMarkdownContent(content, date) {
       }
     }
 
-    if (currentSection === 'overview' && trimmedLine.includes('**')) {
+    if ((currentSection === 'overview' || currentSection === 'stats') && trimmedLine.includes('**')) {
       const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+|待[更统][新计]|约?\s*\d+)/);
       if (statMatch) {
         const label = statMatch[1].trim();
@@ -298,25 +369,6 @@ function parseMarkdownContent(content, date) {
           value = value.replace(/约\s*/, '');
         }
         const count = parseInt(value) || 0;
-        
-        if (label.includes('总采集') || label.includes('总') || label.includes('今日采集')) {
-          result.overview.total = count;
-        } else if (label.includes('高优先') || label.includes('🔴')) {
-          result.overview.high = count;
-        } else if (label.includes('中优先') || label.includes('🟡')) {
-          result.overview.medium = count;
-        } else if (label.includes('低优先') || label.includes('🟢')) {
-          result.overview.low = count;
-        }
-      }
-      continue;
-    }
-
-    if (currentSection === 'stats' && trimmedLine.includes('**')) {
-      const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+|待[更统][新计])/);
-      if (statMatch) {
-        const label = statMatch[1].trim();
-        const count = parseInt(statMatch[2]) || 0;
         
         if (label.includes('总采集') || label.includes('总') || label.includes('今日采集')) {
           result.overview.total = count;
@@ -392,6 +444,18 @@ function parseMarkdownContent(content, date) {
   return result;
 }
 
+function extractVendorNameFromSection(text) {
+  const vendorKeywords = ['AWS', 'Azure', '阿里云', '腾讯云', '华为云', '亚马逊', '微软'];
+  
+  for (const keyword of vendorKeywords) {
+    if (text.includes(keyword)) {
+      return keyword;
+    }
+  }
+  
+  return null;
+}
+
 function extractVendorNameFromHeader(text) {
   let name = text
     .replace(/^[🔴🟠🟡🟢⚪]\s*/, '')
@@ -409,11 +473,17 @@ function extractVendorNameFromHeader(text) {
     return name;
   }
   
+  const vendorKeywords = ['AWS', 'Azure', '阿里云', '腾讯云', '华为云'];
+  for (const keyword of vendorKeywords) {
+    if (name.includes(keyword)) {
+      return keyword;
+    }
+  }
+  
   return name;
 }
 
 function parseItemTitle(text) {
-  // 格式1：1. **【腾讯云】标题** (2026-06-03)
   let match = text.match(/^(\d+)\.\s*\*\*(.+?)\*\*(?:\s*\((\d{4}-\d{2}-\d{2})\))?$/);
   if (match) {
     const fullTitle = match[2].trim();
@@ -426,7 +496,6 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式2：1. **标题** (不带【】)
   match = text.match(/^(\d+)\.\s*\*\*(.+?)\*\*$/);
   if (match) {
     const fullTitle = match[2].trim();
@@ -439,7 +508,6 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式3：1. 【腾讯云】标题 (无**包裹，格式3)
   match = text.match(/^(\d+)\.\s*【(.+?)】(.+)/);
   if (match) {
     const vendorName = match[2].trim();
@@ -452,7 +520,6 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式4：1. 标题 (无**包裹，格式3)
   match = text.match(/^(\d+)\.\s*(.+)/);
   if (match) {
     const fullTitle = match[2].trim();
@@ -465,7 +532,6 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式5：- **标题** （列表项）
   match = text.match(/^-\s*\*\*(.+?)\*\*$/);
   if (match) {
     const fullTitle = match[1].trim();
@@ -478,7 +544,6 @@ function parseItemTitle(text) {
     };
   }
 
-  // 格式6：- 【腾讯云】标题（列表项，格式3）
   match = text.match(/^-\s*【(.+?)】(.+)/);
   if (match) {
     const vendorName = match[1].trim();
