@@ -53,18 +53,18 @@ function parseMarkdownContent(content, date) {
   const result = {
     date,
     title: '',
-   采集时间: '',
-   来源: '',
+    采集时间: '',
+    来源: '',
     overview: {
       total: 0,
       high: 0,
       medium: 0,
       low: 0
     },
-   采集说明: '',
+    采集说明: [],
     vendors: [],
     alerts: [],
-   延续动态: [],
+    延续动态: [],
     recent7Days: [],
     rawContent: content
   };
@@ -75,12 +75,14 @@ function parseMarkdownContent(content, date) {
   let currentItem = null;
   let inAlertSection = false;
   let inRecent7DaysSection = false;
+  let inExtendedSection = false;
+  let inCollectionSection = false;
+  let inExtendedPriority = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmedLine = line.trim();
 
-    // 跳过空行
     if (!trimmedLine) {
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
@@ -89,7 +91,7 @@ function parseMarkdownContent(content, date) {
       continue;
     }
 
-    // 一级标题 - 文档标题
+    // 一级标题
     if (trimmedLine.startsWith('# ')) {
       result.title = trimmedLine.substring(2).trim();
       continue;
@@ -106,12 +108,10 @@ function parseMarkdownContent(content, date) {
 
     // 二级标题 - 大章节
     if (trimmedLine.startsWith('## ')) {
-      // 保存当前项目
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
         currentItem = null;
       }
-      // 保存当前厂商
       if (currentVendor) {
         result.vendors.push(currentVendor);
       }
@@ -121,78 +121,189 @@ function parseMarkdownContent(content, date) {
       if (sectionName.includes('📊') || sectionName.includes('今日概览')) {
         currentSection = 'overview';
         currentVendor = null;
+        inAlertSection = false;
+        inRecent7DaysSection = false;
+        inExtendedSection = false;
+        inCollectionSection = false;
       } else if (sectionName.includes('数据采集说明') || sectionName.includes('⚠️ 数据采集')) {
         currentSection = '采集说明';
         currentVendor = null;
+        inCollectionSection = true;
+        inAlertSection = false;
+        inRecent7DaysSection = false;
+        inExtendedSection = false;
+        result.采集说明 = [];
       } else if (sectionName.includes('☁️')) {
-        // 云厂商
         currentSection = 'vendor';
         currentVendor = {
           name: sectionName.replace(/☁️\s*/, '').trim(),
           id: extractVendorId(sectionName),
-          items: []
+          items: [],
+          note: '' // 厂商段落注释（如"暂无最新抓取数据"）
         };
         currentPriority = null;
+        inAlertSection = false;
+        inRecent7DaysSection = false;
+        inExtendedSection = false;
+        inCollectionSection = false;
       } else if (sectionName.includes('延续') || sectionName.includes('📝')) {
         currentSection = '延续动态';
         currentVendor = null;
+        inExtendedSection = true;
+        inAlertSection = false;
+        inRecent7DaysSection = false;
+        inCollectionSection = false;
+        inExtendedPriority = null;
       } else if (sectionName.includes('活跃告警') || sectionName.includes('⚠️ 活跃告警')) {
         currentSection = 'alerts';
         currentVendor = null;
         inAlertSection = true;
+        inRecent7DaysSection = false;
+        inExtendedSection = false;
+        inCollectionSection = false;
       } else if (sectionName.includes('最近7日') || sectionName.includes('📅')) {
         currentSection = 'recent7Days';
         currentVendor = null;
         inRecent7DaysSection = true;
+        inAlertSection = false;
+        inExtendedSection = false;
+        inCollectionSection = false;
       } else {
         currentSection = null;
         currentVendor = null;
+        inAlertSection = false;
+        inRecent7DaysSection = false;
+        inExtendedSection = false;
+        inCollectionSection = false;
       }
       continue;
     }
 
     // 三级标题 - 优先级
     if (trimmedLine.startsWith('### ')) {
-      // 保存当前项目
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
         currentItem = null;
       }
 
       const priorityName = trimmedLine.substring(4).trim();
-      currentPriority = parsePriority(priorityName);
+      const priority = parsePriority(priorityName);
       
-      // 检查是否有延续标记
       if (priorityName.includes('(延续)') || priorityName.includes('延续')) {
-        currentPriority.isExtended = true;
+        priority.isExtended = true;
+      }
+
+      if (inExtendedSection) {
+        inExtendedPriority = priority;
+      } else if (currentVendor) {
+        currentPriority = priority;
       }
       continue;
     }
 
-    // 四级标题 - 项目标题
-    if (trimmedLine.startsWith('#### ') || /^\d+\./.test(trimmedLine)) {
-      // 保存当前项目
+    // 项目标题（数字开头）
+    if (/^\d+\.\s/.test(trimmedLine) || /^\d+\.\s*\*\*/.test(trimmedLine)) {
       if (currentItem && currentVendor) {
         currentVendor.items.push({...currentItem});
       }
+      if (currentItem && inExtendedSection) {
+        // 处理延续动态
+      }
 
       let title = trimmedLine.replace(/^\d+\.\s*/, '').trim();
-      currentItem = {
-        title,
-        cleanTitle: cleanTitle(title),
-        priority: currentPriority,
-        type: '',
-        摘要: '',
-        影响范围: '',
-        日期: '',
-        来源: ''
-      };
+      // 移除加粗标记
+      title = title.replace(/^\*\*|\*\*$/g, '').trim();
+      
+      // 提取【厂商】标记
+      const vendorMatch = title.match(/【([^】]+)】/);
+      let extractedVendorId = null;
+      let cleanedTitle = title;
+      if (vendorMatch) {
+        extractedVendorId = extractVendorId(vendorMatch[1]);
+        cleanedTitle = title.replace(/【[^】]+】\s*/, '').trim();
+      }
+
+      if (inExtendedSection) {
+        // 延续动态的项目
+        currentItem = {
+          title,
+          cleanTitle: cleanedTitle,
+          priority: inExtendedPriority,
+          type: '',
+          摘要: '',
+          影响范围: '',
+          日期: '',
+          来源: '',
+          isExtended: true,
+          vendorId: extractedVendorId
+        };
+        // 立即保存，因为延续动态没有详细的子项结构
+        if (inExtendedSection) {
+          if (!result.延续动态[getPriorityKey(inExtendedPriority)]) {
+            result.延续动态[getPriorityKey(inExtendedPriority)] = [];
+          }
+          result.延续动态[getPriorityKey(inExtendedPriority)].push({
+            ...currentItem
+          });
+          currentItem = null;
+        }
+      } else if (currentVendor) {
+        currentItem = {
+          title,
+          cleanTitle: cleanedTitle,
+          priority: currentPriority,
+          type: '',
+          摘要: '',
+          影响范围: '',
+          日期: '',
+          来源: '',
+          isExtended: priorityContainsExtending(currentPriority),
+          vendorId: extractedVendorId || currentVendor.id
+        };
+      }
+      continue;
+    }
+
+    // 项目标题（粗体开头）
+    if (trimmedLine.startsWith('**') && !trimmedLine.includes('：') && !trimmedLine.includes(':')) {
+      if (currentItem && currentVendor) {
+        currentVendor.items.push({...currentItem});
+      }
+      let title = trimmedLine.replace(/^\*\*|\*\*$/g, '').trim();
+      // 移除 (延续) 标记
+      title = title.replace(/\(延续\)/g, '').trim();
+      
+      const vendorMatch = title.match(/【([^】]+)】/);
+      let extractedVendorId = null;
+      let cleanedTitle = title;
+      if (vendorMatch) {
+        extractedVendorId = extractVendorId(vendorMatch[1]);
+        cleanedTitle = title.replace(/【[^】]+】\s*/, '').trim();
+      }
+
+      if (inExtendedSection) {
+        // 不处理，因为前面已经处理过
+        continue;
+      } else if (currentVendor) {
+        currentItem = {
+          title,
+          cleanTitle: cleanedTitle,
+          priority: currentPriority,
+          type: '',
+          摘要: '',
+          影响范围: '',
+          日期: '',
+          来源: '',
+          isExtended: priorityContainsExtending(currentPriority),
+          vendorId: extractedVendorId || currentVendor.id
+        };
+      }
       continue;
     }
 
     // 列表项 - 项目属性
-    if (trimmedLine.startsWith('- ')) {
-      const fieldMatch = trimmedLine.match(/^\*\*(.+?)\*\*[：:]\s*(.+)/);
+    if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('  - ')) {
+      const fieldMatch = trimmedLine.match(/^\s*-\s*\*\*(.+?)\*\*[：:]\s*(.+)/);
       if (fieldMatch && currentItem) {
         const fieldName = fieldMatch[1].trim();
         const fieldValue = fieldMatch[2].trim();
@@ -207,26 +318,38 @@ function parseMarkdownContent(content, date) {
           currentItem.日期 = fieldValue;
         } else if (fieldName === '紧急程度') {
           currentItem.紧急程度 = fieldValue;
+        } else if (fieldName === '来源') {
+          // 从值中提取URL
+          const urlMatch = fieldValue.match(/https?:\/\/[^\s\)]+/);
+          if (urlMatch) {
+            currentItem.来源 = urlMatch[0];
+          } else {
+            currentItem.来源 = fieldValue;
+          }
         }
       }
       continue;
     }
 
-    // 来源链接
-    if (trimmedLine.startsWith('- **来源**') || trimmedLine.includes('来源：')) {
-      const urlMatch = trimmedLine.match(/https?:\/\/[^\s\)]+/);
-      if (urlMatch && currentItem) {
-        currentItem.来源 = urlMatch[0];
-      }
+    // 厂商段落注释（如"暂无最新抓取数据"）
+    if (currentVendor && trimmedLine.startsWith('*(') && trimmedLine.endsWith(')*')) {
+      currentVendor.note = trimmedLine.slice(2, -2).trim();
+      continue;
+    }
+
+    // 厂商段落注释
+    if (currentVendor && (trimmedLine.startsWith('*(') || trimmedLine.startsWith('(')) && trimmedLine.endsWith(')')) {
+      currentVendor.note = trimmedLine.replace(/^\*?\(/, '').replace(/\)$/, '').trim();
       continue;
     }
 
     // 概览统计
     if (currentSection === 'overview' && trimmedLine.includes('**')) {
-      const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+)/);
+      const statMatch = trimmedLine.match(/\*\*([^*]+)\*\*[：:]\s*(\d+|待统计)/);
       if (statMatch) {
         const label = statMatch[1].trim();
-        const count = parseInt(statMatch[2]);
+        const value = statMatch[2];
+        const count = value === '待统计' ? 0 : parseInt(value);
         
         if (label.includes('总采集') || label.includes('总')) {
           result.overview.total = count;
@@ -242,22 +365,33 @@ function parseMarkdownContent(content, date) {
     }
 
     // 采集说明
-    if (currentSection === '采集说明') {
-      if (trimmedLine.includes('**')) {
-        result.采集说明 = trimmedLine;
-      }
+    if (inCollectionSection && trimmedLine.includes('**')) {
+      result.采集说明.push(trimmedLine);
       continue;
     }
 
     // 告警解析
     if (inAlertSection) {
-      if (trimmedLine.includes('**') && trimmedLine.includes('-')) {
-        const alertMatch = trimmedLine.match(/\*\*([^*]+)\*\*\s*[-–—]\s*(.+)/);
+      if (trimmedLine.includes('-')) {
+        const alertMatch = trimmedLine.match(/^-\s*(.+)/);
         if (alertMatch) {
-          result.alerts.push({
-            vendor: alertMatch[1].trim(),
-            description: alertMatch[2].trim()
-          });
+          const text = alertMatch[1].trim();
+          const emojiMatch = text.match(/^([🔴🟠🟡🟢])\s*(.+)/);
+          if (emojiMatch) {
+            const parts = emojiMatch[2].split(/\s*[-–—]\s*/);
+            result.alerts.push({
+              icon: emojiMatch[1],
+              vendor: parts[0]?.trim() || '',
+              description: parts[1]?.trim() || emojiMatch[2]
+            });
+          } else {
+            const parts = text.split(/\s*[-–—]\s*/);
+            result.alerts.push({
+              icon: '⚠️',
+              vendor: parts[0]?.trim() || '',
+              description: parts[1]?.trim() || text
+            });
+          }
         }
       }
       continue;
@@ -287,7 +421,6 @@ function parseMarkdownContent(content, date) {
     currentVendor.items.push(currentItem);
   }
   
-  // 保存最后一个厂商
   if (currentVendor) {
     result.vendors.push(currentVendor);
   }
@@ -295,7 +428,17 @@ function parseMarkdownContent(content, date) {
   return result;
 }
 
+function getPriorityKey(priority) {
+  if (!priority) return 'other';
+  return priority.level || 'other';
+}
+
+function priorityContainsExtending(priority) {
+  return priority && priority.isExtended;
+}
+
 function extractVendorId(vendorName) {
+  if (!vendorName) return 'other';
   const nameLower = vendorName.toLowerCase();
   
   if (nameLower.includes('aws') || nameLower.includes('亚马逊')) {
@@ -318,8 +461,9 @@ function extractVendorId(vendorName) {
 }
 
 function parsePriority(text) {
+  if (!text) return { level: 'other', name: '其他', color: '#1890FF', icon: '⚪' };
   if (text.includes('高优先') || text.includes('🔴')) {
-    return { level: 'high', name: '高优先级', color: '#FF0000', icon: '🔴' };
+    return { level: 'high', name: '高优先级', color: '#FF4D4F', icon: '🔴' };
   }
   if (text.includes('中优先') || text.includes('🟡')) {
     return { level: 'medium', name: '中优先级', color: '#FAAD14', icon: '🟡' };
@@ -331,6 +475,7 @@ function parsePriority(text) {
 }
 
 function cleanTitle(title) {
+  if (!title) return '';
   return title
     .replace(/^[\d.]+\s*/, '')
     .replace(/【[^】]+】\s*/, '')

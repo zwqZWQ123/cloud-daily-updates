@@ -48,10 +48,9 @@ function App() {
 
   const toggleVendor = (vendorId) => {
     setSelectedVendors(prev => {
-      const newVendors = prev.includes(vendorId)
+      return prev.includes(vendorId)
         ? prev.filter(id => id !== vendorId)
         : [...prev, vendorId];
-      return newVendors;
     });
   };
 
@@ -69,7 +68,7 @@ function App() {
       );
     }
 
-    // 过滤搜索结果
+    // 搜索过滤
     if (searchLower) {
       filteredVendors = filteredVendors
         .map(vendor => {
@@ -77,10 +76,11 @@ function App() {
           if (vendorMatch) return vendor;
 
           const filteredItems = vendor.items.filter(item =>
-            item.title.toLowerCase().includes(searchLower) ||
-            item.cleanTitle.toLowerCase().includes(searchLower) ||
-            item.摘要.toLowerCase().includes(searchLower) ||
-            item.type.toLowerCase().includes(searchLower)
+            (item.title || '').toLowerCase().includes(searchLower) ||
+            (item.cleanTitle || '').toLowerCase().includes(searchLower) ||
+            (item.摘要 || '').toLowerCase().includes(searchLower) ||
+            (item.type || '').toLowerCase().includes(searchLower) ||
+            (item.影响范围 || '').toLowerCase().includes(searchLower)
           );
 
           return filteredItems.length > 0 ? { ...vendor, items: filteredItems } : null;
@@ -92,8 +92,8 @@ function App() {
     let filteredAlerts = selectedContent.alerts;
     if (searchLower) {
       filteredAlerts = filteredAlerts.filter(alert =>
-        alert.vendor.toLowerCase().includes(searchLower) ||
-        alert.description.toLowerCase().includes(searchLower)
+        (alert.vendor || '').toLowerCase().includes(searchLower) ||
+        (alert.description || '').toLowerCase().includes(searchLower)
       );
     }
 
@@ -141,6 +141,16 @@ function App() {
   const getVendorName = (vendorId) => {
     const vendor = cloudVendors.find(v => v.id === vendorId);
     return vendor ? vendor.name : vendorId;
+  };
+
+  // 获取域名的简化显示
+  const getDomainFromUrl = (url) => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch {
+      return url;
+    }
   };
 
   return (
@@ -274,14 +284,15 @@ function App() {
               {filteredContent.alerts && filteredContent.alerts.length > 0 && (
                 <div className="alerts-section">
                   <h2 className="section-header">
-                    <span className="alert-icon">⚠️</span>
+                    <span className="alert-icon">🚨</span>
                     活跃告警
                   </h2>
                   <div className="alerts-list">
                     {filteredContent.alerts.map((alert, index) => (
                       <div key={index} className="alert-card">
                         <div className="alert-vendor">
-                          【{alert.vendor}】
+                          <span className="alert-icon-inline">{alert.icon}</span>
+                          <strong>【{alert.vendor}】</strong>
                         </div>
                         <div className="alert-description">
                           {alert.description}
@@ -315,6 +326,20 @@ function App() {
                 </div>
               </div>
 
+              {/* 数据采集说明 */}
+              {filteredContent.采集说明 && filteredContent.采集说明.length > 0 && (
+                <div className="collection-section">
+                  <h2 className="section-header">⚠️ 数据采集说明</h2>
+                  <div className="collection-list">
+                    {filteredContent.采集说明.map((item, index) => (
+                      <div key={index} className="collection-item" 
+                        dangerouslySetInnerHTML={{ __html: formatCollectionItem(item) }} 
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 内容标题 */}
               <div className="content-header">
                 <h2 className="content-title">
@@ -322,7 +347,12 @@ function App() {
                 </h2>
                 {filteredContent.采集时间 && (
                   <div className="meta-info">
-                    <span>采集时间：{filteredContent.采集时间}</span>
+                    <span className="meta-badge">⏰ 采集时间：{filteredContent.采集时间}</span>
+                  </div>
+                )}
+                {filteredContent.来源 && (
+                  <div className="meta-info">
+                    <span className="meta-badge">📡 来源：{filteredContent.来源}</span>
                   </div>
                 )}
               </div>
@@ -371,11 +401,17 @@ function App() {
                         </span>
                       </div>
 
+                      {vendor.note && (
+                        <div className="vendor-note">
+                          💡 {vendor.note}
+                        </div>
+                      )}
+
                       <div className="items-list">
                         {vendor.items.map((item, itemIndex) => (
                           <div
                             key={`item-${itemIndex}`}
-                            className="item-card"
+                            className={`item-card ${item.isExtended ? 'extended' : ''}`}
                             style={{ borderLeftColor: item.priority?.color || '#666' }}
                           >
                             <div className="item-header">
@@ -388,45 +424,51 @@ function App() {
                               >
                                 {item.priority?.icon || '⚪'} {item.priority?.name || '其他'}
                               </span>
-                              {item.priority?.isExtended && (
-                                <span className="extended-badge">延续</span>
+                              {item.isExtended && (
+                                <span className="extended-badge">⏰ 延续</span>
                               )}
                             </div>
 
-                            <h4 className="item-title">{item.cleanTitle || item.title}</h4>
+                            <h4 className="item-title">
+                              {item.cleanTitle || item.title}
+                            </h4>
 
-                            <div className="item-meta">
+                            <div className="item-fields">
                               {item.type && (
-                                <span className="meta-tag type">
-                                  📋 {item.type}
-                                </span>
+                                <div className="item-field">
+                                  <span className="field-label">📋 类型</span>
+                                  <span className="field-value">{item.type}</span>
+                                </div>
                               )}
+
+                              {item.摘要 && (
+                                <div className="item-field summary-field">
+                                  <span className="field-label">📝 摘要</span>
+                                  <span className="field-value">{item.摘要}</span>
+                                </div>
+                              )}
+
+                              {item.影响范围 && (
+                                <div className="item-field">
+                                  <span className="field-label">🎯 影响范围</span>
+                                  <span className="field-value">{item.影响范围}</span>
+                                </div>
+                              )}
+
                               {item.日期 && (
-                                <span className="meta-tag date">
-                                  📅 {item.日期}
-                                </span>
+                                <div className="item-field">
+                                  <span className="field-label">📅 日期</span>
+                                  <span className="field-value">{item.日期}</span>
+                                </div>
+                              )}
+
+                              {item.紧急程度 && (
+                                <div className="item-field">
+                                  <span className="field-label">⚠️ 紧急程度</span>
+                                  <span className="field-value urgency">{item.紧急程度}</span>
+                                </div>
                               )}
                             </div>
-
-                            {item.摘要 && (
-                              <div className="item-summary">
-                                {item.摘要}
-                              </div>
-                            )}
-
-                            {item.影响范围 && (
-                              <div className="item-impact">
-                                <strong>影响范围：</strong>
-                                {item.影响范围}
-                              </div>
-                            )}
-
-                            {item.紧急程度 && (
-                              <div className="item-urgency">
-                                <strong>紧急程度：</strong>
-                                <span className="urgency-level">{item.紧急程度}</span>
-                              </div>
-                            )}
 
                             {item.来源 && (
                               <a
@@ -435,7 +477,10 @@ function App() {
                                 rel="noopener noreferrer"
                                 className="source-link"
                               >
-                                🔗 查看详情
+                                <span className="source-icon">🔗</span>
+                                <span className="source-text">查看来源</span>
+                                <span className="source-domain">{getDomainFromUrl(item.来源)}</span>
+                                <span className="source-arrow">→</span>
                               </a>
                             )}
                           </div>
@@ -466,11 +511,11 @@ function App() {
                         {filteredContent.recent7Days.map((row, index) => (
                           <tr key={index}>
                             <td className="date-cell">{row.date}</td>
-                            <td>{row.aws}</td>
-                            <td>{row.azure}</td>
-                            <td>{row.aliyun}</td>
-                            <td>{row.tencent}</td>
-                            <td>{row.huawei}</td>
+                            <td className="vendor-cell">{row.aws}</td>
+                            <td className="vendor-cell">{row.azure}</td>
+                            <td className="vendor-cell">{row.aliyun}</td>
+                            <td className="vendor-cell">{row.tencent}</td>
+                            <td className="vendor-cell">{row.huawei}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -502,6 +547,14 @@ function App() {
         </p>
       </footer>
     </div>
+  );
+}
+
+// 格式化采集说明项
+function formatCollectionItem(text) {
+  // 将 **xxx**: yyy 格式转换为HTML
+  return text.replace(/\*\*([^*]+)\*\*[：:]\s*([^*\n]+)/g, 
+    '<strong>$1</strong>: <span>$2</span>'
   );
 }
 
