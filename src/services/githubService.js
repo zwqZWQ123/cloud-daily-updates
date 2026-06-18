@@ -68,10 +68,18 @@ function parseMarkdownContent(content, date) {
   };
 
   const vendorMap = new Map();
+  const vendorKeywords = ['AWS', 'Azure', '阿里云', '腾讯云', '华为云', '亚马逊', '微软'];
+  const isValidVendorName = (name) => {
+    if (!name) return false;
+    const lowerName = name.toLowerCase();
+    return vendorKeywords.some(keyword => lowerName.includes(keyword.toLowerCase()));
+  };
+  
   const getOrCreateVendor = (name) => {
     if (!name) return null;
     const cleanName = cleanVendorName(name);
     if (!cleanName || cleanName === '其他') return null;
+    if (!isValidVendorName(cleanName)) return null;
     
     const existingEntry = Array.from(vendorMap.values()).find(v => 
       v.name === cleanName || 
@@ -217,15 +225,12 @@ function parseMarkdownContent(content, date) {
         currentItem = null;
       }
       
-      if (sectionName.match(/^[🔴🟡🟢]\s*(高优先级|中优先级|低优先级)/)) {
-        const priority = parsePriority(sectionName);
+      const priorityMatch = parsePriority(sectionName);
+      if (priorityMatch.level !== 'other') {
         if (sectionName.includes('延续')) {
-          priority.isExtended = true;
+          priorityMatch.isExtended = true;
         }
-        currentPriority = priority;
-      } else if (sectionName.match(/^高优先级|^中优先级|^低优先级/)) {
-        const priority = parsePriority(sectionName);
-        currentPriority = priority;
+        currentPriority = priorityMatch;
       } else {
         const vendorName = extractVendorNameFromHeader(sectionName);
         currentVendor = getOrCreateVendor(vendorName);
